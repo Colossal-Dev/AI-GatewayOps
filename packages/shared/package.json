@@ -1,0 +1,7 @@
+{
+  "name": "@ai-gatewayops/shared",
+  "version": "0.1.0",
+  "main": "index.js",
+  "private": true,
+  "description": "Shared constants, sanitizers, and utility functions"
+}

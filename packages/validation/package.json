@@ -1,0 +1,7 @@
+{
+  "name": "@ai-gatewayops/validation",
+  "version": "0.1.0",
+  "main": "index.js",
+  "private": true,
+  "description": "Shared Zod validation schemas for requests and AI responses"
+}

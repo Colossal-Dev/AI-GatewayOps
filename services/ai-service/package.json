@@ -1,0 +1,7 @@
+{
+  "name": "@ai-gatewayops/ai-service",
+  "version": "0.1.0",
+  "main": "src/index.js",
+  "private": true,
+  "description": "AI provider abstraction and prompt orchestrator for AI GatewayOps"
+}

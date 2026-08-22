@@ -1,0 +1,30 @@
+{
+  "name": "ai-gatewayops",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An AI-powered API Gateway and Developer Operations Platform for REST APIs",
+  "workspaces": [
+    "apps/*",
+    "services/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:platform": "npm run dev --workspace=apps/platform-api",
+    "dev:gateway": "npm run dev --workspace=apps/gateway",
+    "dev:dashboard": "npm run dev --workspace=apps/dashboard",
+    "lint": "echo \"Running workspace linter...\"",
+    "test": "echo \"Running workspace tests...\""
+  },
+  "keywords": [
+    "api-gateway",
+    "reverse-proxy",
+    "observability",
+    "ai-ops",
+    "developer-tools",
+    "gemini",
+    "express",
+    "react"
+  ],
+  "author": "AI GatewayOps Team",
+  "license": "MIT"
+}
