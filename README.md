@@ -279,5 +279,8 @@ npm install
 # 2. Configure environment
 cp .env.example .env
 # Edit .env with your MONGODB_URI and GEMINI_API_KEY
-```
 
+# 3. Start Platform API (Control Plane)
+npm run dev:platform
+# Health Check: http://localhost:5000/api/health
+```
