@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const helmet = require('helmet');
+const cookieParser = require('cookie-parser');
 const env = require('./config/env');
 const apiRoutes = require('./routes');
 const notFoundHandler = require('./middleware/notFoundHandler');
@@ -30,6 +31,9 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+
+// Cookie parsing
+app.use(cookieParser());
 
 // Body parsing with conservative 1mb limit
 app.use(express.json({ limit: '1mb' }));
