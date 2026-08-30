@@ -19,14 +19,14 @@
  * 15. Health endpoint (/api/health) still works
  */
 
-const http = require('http');
-const crypto = require('crypto');
-const bcrypt = require('bcrypt');
-const mongoose = require('mongoose');
-const app = require('../src/app');
-const { connectDB, disconnectDB } = require('../src/config/db');
-const User = require('../src/models/User');
-const RefreshSession = require('../src/models/RefreshSession');
+import http from 'http';
+import crypto from 'crypto';
+import bcrypt from 'bcrypt';
+import mongoose from 'mongoose';
+import app from '../src/app.js';
+import { connectDB, disconnectDB } from '../src/config/db.js';
+import User from '../src/models/User.js';
+import RefreshSession from '../src/models/RefreshSession.js';
 
 let server;
 let baseUrl;

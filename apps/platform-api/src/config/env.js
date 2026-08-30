@@ -1,7 +1,10 @@
-const path = require('path');
-const dotenv = require('dotenv');
+import path from 'path';
+import { fileURLToPath } from 'url';
+import dotenv from 'dotenv';
 
 // Load environment configuration predictably from the repository root .env
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 const rootEnvPath = path.resolve(__dirname, '../../../../.env');
 dotenv.config({ path: rootEnvPath });
 
@@ -30,4 +33,4 @@ const env = {
   isTest,
 };
 
-module.exports = env;
+export default env;

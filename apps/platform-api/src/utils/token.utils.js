@@ -1,6 +1,6 @@
-const crypto = require('crypto');
-const jwt = require('jsonwebtoken');
-const env = require('../config/env');
+import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
+import env from '../config/env.js';
 
 /**
  * Parses a duration string (e.g. '15m', '7d', '24h', '30s') or numeric string into milliseconds.
@@ -8,7 +8,7 @@ const env = require('../config/env');
  * @param {string|number} duration
  * @returns {number} Duration in milliseconds
  */
-function parseDurationToMs(duration) {
+export function parseDurationToMs(duration) {
   if (typeof duration === 'number') {
     return duration;
   }
@@ -45,7 +45,7 @@ function parseDurationToMs(duration) {
  * @param {object} payload - Identity payload { id, email, role }
  * @returns {string} Signed JWT string
  */
-function generateAccessToken(payload) {
+export function generateAccessToken(payload) {
   return jwt.sign(
     {
       id: payload.id || payload._id,
@@ -66,7 +66,7 @@ function generateAccessToken(payload) {
  * @param {string} token - Raw JWT string
  * @returns {object} Decoded JWT payload
  */
-function verifyAccessToken(token) {
+export function verifyAccessToken(token) {
   return jwt.verify(token, env.JWT_ACCESS_SECRET);
 }
 
@@ -75,7 +75,7 @@ function verifyAccessToken(token) {
  *
  * @returns {string} 80-character hex string
  */
-function generateRefreshToken() {
+export function generateRefreshToken() {
   return crypto.randomBytes(40).toString('hex');
 }
 
@@ -84,7 +84,7 @@ function generateRefreshToken() {
  *
  * @returns {string} UUID string
  */
-function generateFamilyId() {
+export function generateFamilyId() {
   return crypto.randomUUID();
 }
 
@@ -95,18 +95,9 @@ function generateFamilyId() {
  * @param {string} token - Raw refresh token string
  * @returns {string} 64-character SHA-256 hex string
  */
-function hashRefreshToken(token) {
+export function hashRefreshToken(token) {
   if (!token || typeof token !== 'string') {
     throw new Error('Token is required for hashing');
   }
   return crypto.createHash('sha256').update(token).digest('hex');
 }
-
-module.exports = {
-  parseDurationToMs,
-  generateAccessToken,
-  verifyAccessToken,
-  generateRefreshToken,
-  generateFamilyId,
-  hashRefreshToken,
-};

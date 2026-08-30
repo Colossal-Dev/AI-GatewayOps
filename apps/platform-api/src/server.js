@@ -1,6 +1,6 @@
-const app = require('./app');
-const env = require('./config/env');
-const { connectDB, disconnectDB } = require('./config/db');
+import app from './app.js';
+import env from './config/env.js';
+import { connectDB, disconnectDB } from './config/db.js';
 
 let server = null;
 let isShuttingDown = false;

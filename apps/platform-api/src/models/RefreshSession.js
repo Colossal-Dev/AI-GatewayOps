@@ -1,4 +1,4 @@
-const mongoose = require('mongoose');
+import mongoose from 'mongoose';
 
 const refreshSessionSchema = new mongoose.Schema(
   {
@@ -49,4 +49,4 @@ refreshSessionSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
 
 const RefreshSession = mongoose.model('RefreshSession', refreshSessionSchema);
 
-module.exports = RefreshSession;
+export default RefreshSession;

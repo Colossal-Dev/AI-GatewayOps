@@ -1,15 +1,15 @@
-const bcrypt = require('bcrypt');
-const User = require('../models/User');
-const RefreshSession = require('../models/RefreshSession');
-const ApiError = require('../utils/ApiError');
-const env = require('../config/env');
-const {
+import bcrypt from 'bcrypt';
+import User from '../models/User.js';
+import RefreshSession from '../models/RefreshSession.js';
+import ApiError from '../utils/ApiError.js';
+import env from '../config/env.js';
+import {
   generateAccessToken,
   generateRefreshToken,
   generateFamilyId,
   hashRefreshToken,
   parseDurationToMs,
-} = require('../utils/token.utils');
+} from '../utils/token.utils.js';
 
 const BCRYPT_SALT_ROUNDS = 10;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -24,7 +24,7 @@ const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
  * @param {string} [params.fullName]
  * @returns {Promise<object>} Sanitized User object
  */
-async function register({ email, password, fullName = '' }) {
+export async function register({ email, password, fullName = '' }) {
   if (!email || typeof email !== 'string' || !email.trim()) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Email is required and must be a string');
   }
@@ -74,7 +74,7 @@ async function register({ email, password, fullName = '' }) {
  * @param {string} [params.ipAddress]
  * @returns {Promise<{ user: object, accessToken: string, rawRefreshToken: string }>}
  */
-async function login({ email, password, userAgent = null, ipAddress = null }) {
+export async function login({ email, password, userAgent = null, ipAddress = null }) {
   if (!email || typeof email !== 'string' || !email.trim()) {
     throw new ApiError(400, 'VALIDATION_ERROR', 'Email is required and must be a string');
   }
@@ -127,7 +127,7 @@ async function login({ email, password, userAgent = null, ipAddress = null }) {
  * @param {string} [params.ipAddress]
  * @returns {Promise<{ user: object, accessToken: string, rawRefreshToken: string }>}
  */
-async function refreshSession({ rawRefreshToken, userAgent = null, ipAddress = null }) {
+export async function refreshSession({ rawRefreshToken, userAgent = null, ipAddress = null }) {
   if (!rawRefreshToken || typeof rawRefreshToken !== 'string') {
     throw new ApiError(401, 'UNAUTHORIZED', 'Refresh token is required');
   }
@@ -200,7 +200,7 @@ async function refreshSession({ rawRefreshToken, userAgent = null, ipAddress = n
  * @param {string} params.rawRefreshToken
  * @returns {Promise<{ success: boolean }>}
  */
-async function logout({ rawRefreshToken }) {
+export async function logout({ rawRefreshToken }) {
   if (!rawRefreshToken || typeof rawRefreshToken !== 'string') {
     return { success: true };
   }
@@ -213,10 +213,3 @@ async function logout({ rawRefreshToken }) {
 
   return { success: true };
 }
-
-module.exports = {
-  register,
-  login,
-  refreshSession,
-  logout,
-};

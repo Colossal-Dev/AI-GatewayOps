@@ -1,11 +1,11 @@
-const express = require('express');
-const cors = require('cors');
-const helmet = require('helmet');
-const cookieParser = require('cookie-parser');
-const env = require('./config/env');
-const apiRoutes = require('./routes');
-const notFoundHandler = require('./middleware/notFoundHandler');
-const errorHandler = require('./middleware/errorHandler');
+import express from 'express';
+import cors from 'cors';
+import helmet from 'helmet';
+import cookieParser from 'cookie-parser';
+import env from './config/env.js';
+import apiRoutes from './routes/index.js';
+import notFoundHandler from './middleware/notFoundHandler.js';
+import errorHandler from './middleware/errorHandler.js';
 
 const app = express();
 
@@ -48,4 +48,4 @@ app.use(notFoundHandler);
 // Centralized error handler
 app.use(errorHandler);
 
-module.exports = app;
+export default app;

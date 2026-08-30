@@ -1,4 +1,4 @@
-const ApiError = require('../utils/ApiError');
+import ApiError from '../utils/ApiError.js';
 
 /**
  * Middleware factory for role-based authorization.
@@ -23,4 +23,4 @@ function authorize(roles = []) {
   };
 }
 
-module.exports = authorize;
+export default authorize;

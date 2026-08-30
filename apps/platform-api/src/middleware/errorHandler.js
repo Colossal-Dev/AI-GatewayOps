@@ -1,4 +1,4 @@
-const env = require('../config/env');
+import env from '../config/env.js';
 
 /**
  * Centralized error-handling middleware.
@@ -43,4 +43,4 @@ const errorHandler = (err, req, res, next) => { // eslint-disable-line no-unused
   });
 };
 
-module.exports = errorHandler;
+export default errorHandler;

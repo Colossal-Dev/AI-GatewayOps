@@ -1,6 +1,7 @@
 {
   "name": "@ai-gatewayops/platform-api",
   "version": "0.1.0",
+  "type": "module",
   "main": "src/server.js",
   "private": true,
   "scripts": {

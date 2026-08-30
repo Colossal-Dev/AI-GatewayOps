@@ -1,7 +1,7 @@
-const { Router } = require('express');
-const authController = require('../controllers/auth.controller');
-const authenticate = require('../middleware/authenticate');
-const authorize = require('../middleware/authorize');
+import { Router } from 'express';
+import * as authController from '../controllers/auth.controller.js';
+import authenticate from '../middleware/authenticate.js';
+import authorize from '../middleware/authorize.js';
 
 const router = Router();
 
@@ -21,4 +21,4 @@ router.get('/admin-check', authenticate, authorize('admin'), (req, res) => {
   });
 });
 
-module.exports = router;
+export default router;

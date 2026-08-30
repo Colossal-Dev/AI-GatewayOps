@@ -1,12 +1,12 @@
-const mongoose = require('mongoose');
-const env = require('./env');
+import mongoose from 'mongoose';
+import env from './env.js';
 
 /**
  * Sanitizes MongoDB connection URI for safe logging (masks credentials).
  * @param {string} uri - Raw connection URI
  * @returns {string} Sanitized URI
  */
-function sanitizeMongoUri(uri) {
+export function sanitizeMongoUri(uri) {
   if (!uri) return 'undefined';
   try {
     const parsed = new URL(uri);
@@ -25,7 +25,7 @@ function sanitizeMongoUri(uri) {
  * Configured with serverSelectionTimeoutMS to fail fast if MongoDB is unreachable.
  * @returns {Promise<typeof mongoose>}
  */
-async function connectDB() {
+export async function connectDB() {
   const sanitizedUri = sanitizeMongoUri(env.MONGODB_URI);
 
   const options = {
@@ -59,7 +59,7 @@ async function connectDB() {
  * Disconnects from MongoDB database cleanly.
  * @returns {Promise<void>}
  */
-async function disconnectDB() {
+export async function disconnectDB() {
   try {
     if (mongoose.connection.readyState !== 0) {
       await mongoose.disconnect();
@@ -70,9 +70,3 @@ async function disconnectDB() {
     throw error;
   }
 }
-
-module.exports = {
-  connectDB,
-  disconnectDB,
-  sanitizeMongoUri,
-};

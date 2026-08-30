@@ -1,6 +1,6 @@
-const authService = require('../services/auth.service');
-const env = require('../config/env');
-const { parseDurationToMs } = require('../utils/token.utils');
+import * as authService from '../services/auth.service.js';
+import env from '../config/env.js';
+import { parseDurationToMs } from '../utils/token.utils.js';
 
 /**
  * Returns cookie options for the refresh token cookie.
@@ -33,7 +33,7 @@ function getClearCookieOptions() {
  * Handler for user registration.
  * POST /api/auth/register
  */
-async function register(req, res, next) {
+export async function register(req, res, next) {
   try {
     const { email, password, fullName } = req.body;
     const user = await authService.register({ email, password, fullName });
@@ -53,7 +53,7 @@ async function register(req, res, next) {
  * Handler for user login.
  * POST /api/auth/login
  */
-async function login(req, res, next) {
+export async function login(req, res, next) {
   try {
     const { email, password } = req.body;
     const userAgent = req.headers['user-agent'] || null;
@@ -84,7 +84,7 @@ async function login(req, res, next) {
  * Handler for refreshing access tokens with refresh token rotation.
  * POST /api/auth/refresh
  */
-async function refresh(req, res, next) {
+export async function refresh(req, res, next) {
   try {
     const rawRefreshToken = req.cookies?.[env.REFRESH_COOKIE_NAME];
     const userAgent = req.headers['user-agent'] || null;
@@ -114,7 +114,7 @@ async function refresh(req, res, next) {
  * Handler for user logout.
  * POST /api/auth/logout
  */
-async function logout(req, res, next) {
+export async function logout(req, res, next) {
   try {
     const rawRefreshToken = req.cookies?.[env.REFRESH_COOKIE_NAME];
 
@@ -135,7 +135,7 @@ async function logout(req, res, next) {
  * Handler for retrieving the authenticated user's profile.
  * GET /api/auth/me
  */
-async function getMe(req, res, next) {
+export async function getMe(req, res, next) {
   try {
     return res.status(200).json({
       success: true,
@@ -147,11 +147,3 @@ async function getMe(req, res, next) {
     return next(error);
   }
 }
-
-module.exports = {
-  register,
-  login,
-  refresh,
-  logout,
-  getMe,
-};

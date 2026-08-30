@@ -1,5 +1,5 @@
-const { verifyAccessToken } = require('../utils/token.utils');
-const ApiError = require('../utils/ApiError');
+import { verifyAccessToken } from '../utils/token.utils.js';
+import ApiError from '../utils/ApiError.js';
 
 /**
  * Middleware to authenticate requests using a JWT Bearer access token.
@@ -42,4 +42,4 @@ function authenticate(req, res, next) {
   }
 }
 
-module.exports = authenticate;
+export default authenticate;
