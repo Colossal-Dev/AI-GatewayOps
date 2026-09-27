@@ -34,6 +34,10 @@ export function getRedisClient() {
  * @returns {Promise<import('redis').RedisClientType>}
  */
 export async function connectRedis() {
+  if (redisClient && redisClient.isOpen) {
+    return redisClient;
+  }
+
   const url = process.env.REDIS_URL;
 
   if (!url) {
@@ -48,7 +52,11 @@ export async function connectRedis() {
     redisClient = createClient({
       url,
       socket: {
-        reconnectStrategy: false,
+        reconnectStrategy: (retries) => {
+          // Exponential backoff reconnect strategy (capped at 3000ms)
+          const delay = Math.min(retries * 100, 3000);
+          return delay;
+        },
       },
     });
 
@@ -58,6 +66,14 @@ export async function connectRedis() {
 
     redisClient.on('connect', () => {
       console.log(`[Redis] Connection established: ${sanitizedUrl}`);
+    });
+
+    redisClient.on('ready', () => {
+      console.log('[Redis] Connection ready to accept commands');
+    });
+
+    redisClient.on('reconnecting', () => {
+      console.log('[Redis] Connection reconnecting...');
     });
 
     redisClient.on('end', () => {
@@ -87,8 +103,12 @@ export async function connectRedis() {
  */
 export async function disconnectRedis() {
   try {
-    if (redisClient && redisClient.isOpen) {
-      await redisClient.quit();
+    if (redisClient) {
+      if (redisClient.isOpen) {
+        await redisClient.quit();
+      } else {
+        await redisClient.disconnect();
+      }
       console.log('[Redis] Successfully disconnected from Redis');
     }
   } catch (error) {
