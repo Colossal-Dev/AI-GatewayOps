@@ -1,6 +1,7 @@
 import express from 'express';
 import healthRoutes from './routes/health.routes.js';
 import apiKeyAuth from './middleware/apiKeyAuth.js';
+import rateLimiter from './middleware/rateLimiter.js';
 import routeMatcher from './middleware/routeMatcher.js';
 import upstreamProxy from './middleware/upstreamProxy.js';
 
@@ -15,8 +16,8 @@ app.use('/api/health', healthRoutes);
 app.use('/health', healthRoutes);
 
 // Gateway Proxy Middleware Pipeline
-// Strict execution order: apiKeyAuth -> routeMatcher -> upstreamProxy
-const proxyMiddleware = [apiKeyAuth, routeMatcher, upstreamProxy];
+// Strict execution order: apiKeyAuth -> rateLimiter -> routeMatcher -> upstreamProxy
+const proxyMiddleware = [apiKeyAuth, rateLimiter, routeMatcher, upstreamProxy];
 
 // Mount proxy pipeline on /proxy prefix and root wildcard
 app.use('/proxy', proxyMiddleware);

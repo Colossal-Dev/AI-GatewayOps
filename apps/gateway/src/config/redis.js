@@ -30,6 +30,14 @@ export function getRedisClient() {
 }
 
 /**
+ * Sets or overrides the active Redis client instance (useful for testing).
+ * @param {import('redis').RedisClientType | null} client
+ */
+export function setRedisClient(client) {
+  redisClient = client;
+}
+
+/**
  * Connects to Redis cache using the configured REDIS_URL environment variable.
  * @returns {Promise<import('redis').RedisClientType>}
  */
