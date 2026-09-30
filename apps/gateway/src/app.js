@@ -1,11 +1,17 @@
 import express from 'express';
 import healthRoutes from './routes/health.routes.js';
+import requestId from './middleware/requestId.js';
+import requestLogger from './middleware/requestLogger.js';
 import apiKeyAuth from './middleware/apiKeyAuth.js';
 import rateLimiter from './middleware/rateLimiter.js';
 import routeMatcher from './middleware/routeMatcher.js';
 import upstreamProxy from './middleware/upstreamProxy.js';
 
 const app = express();
+
+// Correlation ID & Request Observability Logging
+app.use(requestId);
+app.use(requestLogger);
 
 // Body parsing
 app.use(express.json());
