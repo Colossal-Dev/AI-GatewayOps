@@ -4,7 +4,7 @@ const projectSchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: true,
+      required: [true, 'Project name is required'],
       trim: true,
     },
     description: {
@@ -19,16 +19,34 @@ const projectSchema = new mongoose.Schema(
     },
     upstream: {
       type: String,
-      required: true,
+      required: [true, 'Upstream URL is required'],
       trim: true,
     },
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
+      required: [true, 'Owner ID is required'],
+      index: true,
     },
   },
   {
     timestamps: true,
+    toJSON: {
+      transform(doc, ret) {
+        ret.id = ret._id ? ret._id.toString() : undefined;
+        delete ret._id;
+        delete ret.__v;
+        return ret;
+      },
+    },
+    toObject: {
+      transform(doc, ret) {
+        ret.id = ret._id ? ret._id.toString() : undefined;
+        delete ret._id;
+        delete ret.__v;
+        return ret;
+      },
+    },
   }
 );
 
