@@ -27,31 +27,36 @@
  * SECURITY:
  * 16. Unauthenticated management request -> 401
  * 17. Unauthorized project access (User B accessing User A's project) -> 403
- * 18. Nonexistent project -> 404
- * 19. Invalid request payload -> 400
+ * 18. Ownerless legacy project -> developer access denied across all endpoints -> 403
+ * 19. Ownerless legacy project -> admin remediation -> 200
+ * 20. Project schema parity between Platform API and Gateway models
+ * 21. Nonexistent project -> 404
+ * 22. Invalid request payload -> 400
  *
  * INTEGRATION:
- * 20. Create an active project via Control Plane API
- * 21. Create an active API key for it via Control Plane API
- * 22. Create GET /users/123 route via Control Plane API
- * 23. Confirm the resulting documents are fully compatible with existing Gateway
- * 24. Confirm no manual MongoDB document insertions were required
+ * 23. Create an active project via Control Plane API
+ * 24. Create an active API key for it via Control Plane API
+ * 25. Create GET /users/123 route via Control Plane API
+ * 26. Confirm the resulting documents are fully compatible with existing Gateway
+ * 27. Confirm standard workflows require zero manual MongoDB insertions (distinguished from legacy security fixture)
  */
 
 import http from 'http';
 import assert from 'node:assert/strict';
 import mongoose from 'mongoose';
+import bcrypt from 'bcrypt';
 import app from '../apps/platform-api/src/app.js';
 import { connectDB, disconnectDB } from '../apps/platform-api/src/config/db.js';
-import Project from '../apps/platform-api/src/models/Project.js';
+import Project, { projectSchema as platformProjectSchema } from '../apps/platform-api/src/models/Project.js';
 import APIKey from '../apps/platform-api/src/models/APIKey.js';
 import Route from '../apps/platform-api/src/models/Route.js';
 import User from '../apps/platform-api/src/models/User.js';
 import RefreshSession from '../apps/platform-api/src/models/RefreshSession.js';
 
-// Gateway middleware to verify integration compatibility
+// Gateway middleware & schemas to verify integration compatibility and parity
 import apiKeyAuth from '../apps/gateway/src/middleware/apiKeyAuth.js';
 import routeMatcher from '../apps/gateway/src/middleware/routeMatcher.js';
+import { projectSchema as gatewayProjectSchema } from '../apps/gateway/src/models/project.model.js';
 
 let server;
 let baseUrl;
@@ -108,13 +113,14 @@ async function runControlPlaneVerification() {
   const testTimestamp = Date.now();
   const userAEmail = `user.a.${testTimestamp}@gatewayops.test`;
   const userBEmail = `user.b.${testTimestamp}@gatewayops.test`;
+  const adminEmail = `admin.${testTimestamp}@gatewayops.test`;
   const testPassword = 'Password123!Secure';
 
   try {
     // -----------------------------------------------------------
-    // SETUP: Register & Authenticate User A and User B
+    // SETUP: Register & Authenticate User A, User B, and Admin User
     // -----------------------------------------------------------
-    console.log('[Setup] Registering and authenticating Test User A and Test User B...');
+    console.log('[Setup] Registering and authenticating Test User A, Test User B, and Admin User...');
 
     const regARes = await apiRequest('/api/auth/register', {
       method: 'POST',
@@ -148,14 +154,34 @@ async function runControlPlaneVerification() {
     const tokenB = loginBRes.body.data.accessToken;
     assert.ok(tokenB, 'User B should receive access token');
 
-    console.log('  ✓ Setup completed successfully\n');
+    // Admin user creation via established application model and login
+    const adminPasswordHash = await bcrypt.hash(testPassword, 10);
+    const adminUser = await User.create({
+      email: adminEmail,
+      passwordHash: adminPasswordHash,
+      fullName: 'Admin Operations User',
+      role: 'admin',
+      isActive: true,
+    });
+    const adminUserId = adminUser._id.toString();
+    createdUserIds.push(adminUserId);
+
+    const loginAdminRes = await apiRequest('/api/auth/login', {
+      method: 'POST',
+      body: { email: adminEmail, password: testPassword },
+    });
+    assert.equal(loginAdminRes.status, 200, 'Admin login should return 200');
+    const tokenAdmin = loginAdminRes.body.data.accessToken;
+    assert.ok(tokenAdmin, 'Admin should receive access token');
+
+    console.log('  ✓ Setup completed successfully (User A, User B, Admin User authenticated)\n');
 
     // ===========================================================
     // SECTION 1: PROJECTS
     // ===========================================================
 
     // TEST 1: Create Project -> 201
-    console.log('[TEST 1/24] [Projects] POST /api/projects -> 201');
+    console.log('[TEST 1/27] [Projects] POST /api/projects -> 201');
     const createProjRes = await apiRequest('/api/projects', {
       method: 'POST',
       token: tokenA,
@@ -178,7 +204,7 @@ async function runControlPlaneVerification() {
     console.log(`  ✓ Project created: id=${projectAId}, status=201 OK\n`);
 
     // TEST 2: List Projects -> 200
-    console.log('[TEST 2/24] [Projects] GET /api/projects -> 200');
+    console.log('[TEST 2/27] [Projects] GET /api/projects -> 200');
     const listProjRes = await apiRequest('/api/projects', {
       method: 'GET',
       token: tokenA,
@@ -203,7 +229,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Projects listed with multi-tenant isolation (200 OK)\n');
 
     // TEST 3: Get Project -> 200
-    console.log(`[TEST 3/24] [Projects] GET /api/projects/${projectAId} -> 200`);
+    console.log(`[TEST 3/27] [Projects] GET /api/projects/${projectAId} -> 200`);
     const getProjRes = await apiRequest(`/api/projects/${projectAId}`, {
       method: 'GET',
       token: tokenA,
@@ -213,7 +239,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Project retrieved by ID (200 OK)\n');
 
     // TEST 4: Update Project -> 200
-    console.log(`[TEST 4/24] [Projects] PATCH /api/projects/${projectAId} -> 200`);
+    console.log(`[TEST 4/27] [Projects] PATCH /api/projects/${projectAId} -> 200`);
     const updateProjRes = await apiRequest(`/api/projects/${projectAId}`, {
       method: 'PATCH',
       token: tokenA,
@@ -241,7 +267,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Project updated and verified (200 OK)\n');
 
     // TEST 5: Delete / Deactivate Project -> expected success
-    console.log('[TEST 5/24] [Projects] DELETE /api/projects/:projectId -> expected success');
+    console.log('[TEST 5/27] [Projects] DELETE /api/projects/:projectId -> expected success');
     const tempProjRes = await apiRequest('/api/projects', {
       method: 'POST',
       token: tokenA,
@@ -268,7 +294,7 @@ async function runControlPlaneVerification() {
     // ===========================================================
 
     // TEST 6: Create API Key -> 201
-    console.log(`[TEST 6/24] [API Keys] POST /api/projects/${projectAId}/api-keys -> 201`);
+    console.log(`[TEST 6/27] [API Keys] POST /api/projects/${projectAId}/api-keys -> 201`);
     const createKeyRes = await apiRequest(`/api/projects/${projectAId}/api-keys`, {
       method: 'POST',
       token: tokenA,
@@ -289,7 +315,7 @@ async function runControlPlaneVerification() {
     console.log(`  ✓ API key created: keyId=${keyId} (201 Created)\n`);
 
     // TEST 7: Plaintext secret is returned only according to creation contract
-    console.log('[TEST 7/24] [API Keys] Plaintext secret returned in creation response');
+    console.log('[TEST 7/27] [API Keys] Plaintext secret returned in creation response');
     assert.ok(plaintextSecret, 'Plaintext secret must be returned in creation response');
     assert.ok(plaintextSecret.startsWith('sec_'), 'Secret must start with sec_');
     assert.equal(
@@ -300,7 +326,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Plaintext secret returned cleanly in creation contract\n');
 
     // TEST 8: secretHash is never returned
-    console.log('[TEST 8/24] [API Keys] secretHash is NEVER exposed');
+    console.log('[TEST 8/27] [API Keys] secretHash is NEVER exposed');
     assert.equal(apiKeyData.secretHash, undefined, 'secretHash must be undefined in response object');
     const creationResponseStr = JSON.stringify(createKeyRes.body);
     assert.equal(
@@ -311,7 +337,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Verified secretHash is never returned in API responses\n');
 
     // TEST 9: List API keys -> 200 and secrets are not exposed
-    console.log(`[TEST 9/24] [API Keys] GET /api/projects/${projectAId}/api-keys -> 200`);
+    console.log(`[TEST 9/27] [API Keys] GET /api/projects/${projectAId}/api-keys -> 200`);
     const listKeysRes = await apiRequest(`/api/projects/${projectAId}/api-keys`, {
       method: 'GET',
       token: tokenA,
@@ -335,7 +361,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Listed API keys securely without exposing secrets (200 OK)\n');
 
     // TEST 10: Revoke / Delete API Key -> expected success
-    console.log(`[TEST 10/24] [API Keys] DELETE /api/projects/${projectAId}/api-keys/:keyId -> expected success`);
+    console.log(`[TEST 10/27] [API Keys] DELETE /api/projects/${projectAId}/api-keys/:keyId -> expected success`);
     const createKey2Res = await apiRequest(`/api/projects/${projectAId}/api-keys`, {
       method: 'POST',
       token: tokenA,
@@ -362,7 +388,7 @@ async function runControlPlaneVerification() {
     // ===========================================================
 
     // TEST 11: Create Route -> 201 & duplicate check -> 409
-    console.log(`[TEST 11/24] [Routes] POST /api/projects/${projectAId}/routes -> 201`);
+    console.log(`[TEST 11/27] [Routes] POST /api/projects/${projectAId}/routes -> 201`);
     const createRouteRes = await apiRequest(`/api/projects/${projectAId}/routes`, {
       method: 'POST',
       token: tokenA,
@@ -393,7 +419,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Route created (201) and duplicate route rejected with 409 Conflict\n');
 
     // TEST 12: List Routes -> 200
-    console.log(`[TEST 12/24] [Routes] GET /api/projects/${projectAId}/routes -> 200`);
+    console.log(`[TEST 12/27] [Routes] GET /api/projects/${projectAId}/routes -> 200`);
     const listRoutesRes = await apiRequest(`/api/projects/${projectAId}/routes`, {
       method: 'GET',
       token: tokenA,
@@ -405,7 +431,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Routes listed successfully (200 OK)\n');
 
     // TEST 13: Get Route -> 200
-    console.log(`[TEST 13/24] [Routes] GET /api/projects/${projectAId}/routes/${routeAId} -> 200`);
+    console.log(`[TEST 13/27] [Routes] GET /api/projects/${projectAId}/routes/${routeAId} -> 200`);
     const getRouteRes = await apiRequest(`/api/projects/${projectAId}/routes/${routeAId}`, {
       method: 'GET',
       token: tokenA,
@@ -415,7 +441,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Route retrieved by ID (200 OK)\n');
 
     // TEST 14: Update Route -> 200
-    console.log(`[TEST 14/24] [Routes] PATCH /api/projects/${projectAId}/routes/${routeAId} -> 200`);
+    console.log(`[TEST 14/27] [Routes] PATCH /api/projects/${projectAId}/routes/${routeAId} -> 200`);
     const updateRouteRes = await apiRequest(`/api/projects/${projectAId}/routes/${routeAId}`, {
       method: 'PATCH',
       token: tokenA,
@@ -430,7 +456,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Route updated successfully (200 OK)\n');
 
     // TEST 15: Delete Route -> expected success
-    console.log(`[TEST 15/24] [Routes] DELETE /api/projects/${projectAId}/routes/${routeAId} -> expected success`);
+    console.log(`[TEST 15/27] [Routes] DELETE /api/projects/${projectAId}/routes/${routeAId} -> expected success`);
     const deleteRouteRes = await apiRequest(`/api/projects/${projectAId}/routes/${routeAId}`, {
       method: 'DELETE',
       token: tokenA,
@@ -449,7 +475,7 @@ async function runControlPlaneVerification() {
     // ===========================================================
 
     // TEST 16: Unauthenticated management request -> 401
-    console.log('[TEST 16/24] [Security] Unauthenticated management request -> 401');
+    console.log('[TEST 16/27] [Security] Unauthenticated management request -> 401');
     const noAuthRes = await apiRequest('/api/projects');
     assert.equal(noAuthRes.status, 401, 'Request without token must return 401');
     assert.equal(noAuthRes.body.error.code, 'UNAUTHORIZED', 'Error code must be UNAUTHORIZED');
@@ -461,7 +487,7 @@ async function runControlPlaneVerification() {
     console.log('  ✓ Unauthenticated requests rejected with 401 Unauthorized\n');
 
     // TEST 17: Unauthorized project access -> 403
-    console.log('[TEST 17/24] [Security] Unauthorized project access -> 403');
+    console.log('[TEST 17/27] [Security] Unauthorized project access -> 403');
     const unauthGetProj = await apiRequest(`/api/projects/${projectAId}`, {
       method: 'GET',
       token: tokenB,
@@ -483,8 +509,206 @@ async function runControlPlaneVerification() {
     assert.equal(unauthCreateRoute.status, 403, 'User B creating route on User A project must return 403');
     console.log('  ✓ Unauthorized cross-tenant access blocked with 403 Forbidden\n');
 
-    // TEST 18: Nonexistent project -> 404
-    console.log('[TEST 18/24] [Validation] Nonexistent project -> 404');
+    // TEST 18: Ownerless project -> developer access denied across all endpoints
+    console.log('[TEST 18/27] [Security] Ownerless project: developer access denied across all endpoints');
+    const legacyProjectDoc = {
+      name: 'Legacy Ownerless Project',
+      upstream: 'http://localhost:8080',
+      description: 'Legacy unowned document created without ownerId',
+      status: 'active',
+      ownerId: null, // intentionally null / omitted
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    };
+    const legacyInsertRes = await Project.collection.insertOne(legacyProjectDoc);
+    const ownerlessProjId = legacyInsertRes.insertedId.toString();
+    createdProjectIds.push(ownerlessProjId);
+
+    // 1. GET /api/projects/:projectId -> 403 FORBIDDEN
+    const devGetRes = await apiRequest(`/api/projects/${ownerlessProjId}`, {
+      method: 'GET',
+      token: tokenA,
+    });
+    assert.equal(devGetRes.status, 403, 'Developer reading ownerless project must return 403');
+    assert.equal(devGetRes.body?.error?.code, 'FORBIDDEN', 'Error code must be FORBIDDEN');
+
+    // 2. PATCH /api/projects/:projectId -> 403 FORBIDDEN
+    const devPatchRes = await apiRequest(`/api/projects/${ownerlessProjId}`, {
+      method: 'PATCH',
+      token: tokenA,
+      body: { name: 'Attempted Malicious Rename', status: 'disabled' },
+    });
+    assert.equal(devPatchRes.status, 403, 'Developer modifying ownerless project must return 403');
+    assert.equal(devPatchRes.body?.error?.code, 'FORBIDDEN', 'Error code must be FORBIDDEN');
+
+    // 3. DELETE /api/projects/:projectId -> 403 FORBIDDEN
+    const devDeleteRes = await apiRequest(`/api/projects/${ownerlessProjId}`, {
+      method: 'DELETE',
+      token: tokenA,
+    });
+    assert.equal(devDeleteRes.status, 403, 'Developer deleting ownerless project must return 403');
+    assert.equal(devDeleteRes.body?.error?.code, 'FORBIDDEN', 'Error code must be FORBIDDEN');
+
+    // 4. POST /api/projects/:projectId/api-keys -> 403 FORBIDDEN
+    const devKeyRes = await apiRequest(`/api/projects/${ownerlessProjId}/api-keys`, {
+      method: 'POST',
+      token: tokenA,
+    });
+    assert.equal(devKeyRes.status, 403, 'Developer issuing API key on ownerless project must return 403');
+    assert.equal(devKeyRes.body?.error?.code, 'FORBIDDEN', 'Error code must be FORBIDDEN');
+
+    // 5. POST /api/projects/:projectId/routes -> 403 FORBIDDEN
+    const devRouteRes = await apiRequest(`/api/projects/${ownerlessProjId}/routes`, {
+      method: 'POST',
+      token: tokenA,
+      body: { path: '/malicious-route', method: 'GET' },
+    });
+    assert.equal(devRouteRes.status, 403, 'Developer creating route on ownerless project must return 403');
+    assert.equal(devRouteRes.body?.error?.code, 'FORBIDDEN', 'Error code must be FORBIDDEN');
+
+    // 6. GET /api/projects -> 200 OK (Listing isolation: must NOT include ownerless legacy project)
+    const devListRes = await apiRequest('/api/projects', {
+      method: 'GET',
+      token: tokenA,
+    });
+    assert.equal(devListRes.status, 200, 'Developer listing projects must return 200');
+    assert.ok(Array.isArray(devListRes.body?.data?.projects), 'Projects list must be an array');
+    const devListHasOwnerless = devListRes.body.data.projects.some(
+      (p) => (p.id || p._id).toString() === ownerlessProjId
+    );
+    assert.equal(devListHasOwnerless, false, 'Developer project listing must not include ownerless legacy project');
+
+    // Verify DB state was NOT mutated or corrupted by denied requests
+    const dbProject = await Project.collection.findOne({ _id: legacyInsertRes.insertedId });
+    assert.ok(dbProject, 'Ownerless project must still exist in DB after denied attempts');
+    assert.equal(dbProject.name, 'Legacy Ownerless Project', 'Project name must remain unchanged');
+    assert.equal(dbProject.status, 'active', 'Project status must remain unchanged');
+
+    const dbKeys = await APIKey.find({ projectId: legacyInsertRes.insertedId });
+    assert.equal(dbKeys.length, 0, 'No API keys should have been created on ownerless project');
+
+    const dbRoutes = await Route.find({ projectId: legacyInsertRes.insertedId });
+    assert.equal(dbRoutes.length, 0, 'No routes should have been created on ownerless project');
+
+    console.log('  ✓ Developer access to ownerless project strictly rejected across all endpoints (403 FORBIDDEN)\n');
+
+    // TEST 19: Ownerless project -> admin remediation
+    console.log('[TEST 19/27] [Security] Ownerless project: admin remediation via genuine admin token');
+    // 1. GET /api/projects/:projectId -> 200 OK
+    const adminGetRes = await apiRequest(`/api/projects/${ownerlessProjId}`, {
+      method: 'GET',
+      token: tokenAdmin,
+    });
+    assert.equal(adminGetRes.status, 200, 'Admin retrieving ownerless project must return 200');
+    assert.equal(adminGetRes.body?.data?.project?.name, 'Legacy Ownerless Project', 'Project name should match');
+
+    // 2. DELETE /api/projects/:projectId -> 200 OK
+    const adminDeleteRes = await apiRequest(`/api/projects/${ownerlessProjId}`, {
+      method: 'DELETE',
+      token: tokenAdmin,
+    });
+    assert.equal(adminDeleteRes.status, 200, 'Admin deleting ownerless project must return 200');
+    assert.equal(adminDeleteRes.body?.success, true, 'Delete response success should be true');
+
+    // Verify project document is deleted from DB
+    const dbDeletedProject = await Project.collection.findOne({ _id: legacyInsertRes.insertedId });
+    assert.equal(dbDeletedProject, null, 'Ownerless project document must be removed from DB');
+
+    // Subsequent GET returns 404
+    const adminSubsequentGet = await apiRequest(`/api/projects/${ownerlessProjId}`, {
+      method: 'GET',
+      token: tokenAdmin,
+    });
+    assert.equal(adminSubsequentGet.status, 404, 'Deleted ownerless project must return 404');
+    assert.equal(adminSubsequentGet.body?.error?.code, 'PROJECT_NOT_FOUND', 'Error code must be PROJECT_NOT_FOUND');
+    console.log('  ✓ Admin remediation of ownerless project verified (GET 200 OK -> DELETE 200 OK)\n');
+
+    // TEST 20: Project schema parity between Platform API and Gateway models
+    console.log('[TEST 20/27] [Schema] Project schema parity between Platform API and Gateway models');
+
+    // 1. Ensure both schemas require ownerId (via path.isRequired and path options)
+    const platformOwnerPath = platformProjectSchema.path('ownerId');
+    const gatewayOwnerPath = gatewayProjectSchema.path('ownerId');
+    assert.ok(platformOwnerPath, 'Platform API Project schema must define ownerId path');
+    assert.ok(gatewayOwnerPath, 'Gateway Project schema must define ownerId path');
+    assert.equal(platformOwnerPath.isRequired, true, 'Platform API Project schema must require ownerId');
+    assert.equal(gatewayOwnerPath.isRequired, true, 'Gateway Project schema must require ownerId');
+    assert.ok(platformOwnerPath.options.required, 'Platform API Project schema options must define required');
+    assert.ok(gatewayOwnerPath.options.required, 'Gateway Project schema options must define required');
+
+    // 2. Normalize and compare relevant ownerId index specifications (do not rely solely on internal _index)
+    function normalizeOwnerIdIndexes(schema) {
+      const rawIndexes = typeof schema.indexes === 'function' ? schema.indexes() : [];
+      const relevant = [];
+
+      for (const [fields, options = {}] of rawIndexes) {
+        if ('ownerId' in fields) {
+          relevant.push({
+            fields: { ownerId: fields.ownerId },
+            unique: Boolean(options.unique),
+            sparse: Boolean(options.sparse),
+          });
+        }
+      }
+
+      // Also inspect path configuration directly to ensure full coverage
+      const ownerPath = schema.path('ownerId');
+      const pathIndexOpt = ownerPath?.options?.index;
+      if (pathIndexOpt && relevant.length === 0) {
+        relevant.push({
+          fields: { ownerId: 1 },
+          unique: Boolean(typeof pathIndexOpt === 'object' && pathIndexOpt.unique),
+          sparse: Boolean(typeof pathIndexOpt === 'object' && pathIndexOpt.sparse),
+        });
+      }
+
+      relevant.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+      return relevant;
+    }
+
+    const platformNormalizedIndexes = normalizeOwnerIdIndexes(platformProjectSchema);
+    const gatewayNormalizedIndexes = normalizeOwnerIdIndexes(gatewayProjectSchema);
+
+    assert.ok(platformNormalizedIndexes.length > 0, 'Platform API Project schema must define an index on ownerId');
+    assert.ok(gatewayNormalizedIndexes.length > 0, 'Gateway Project schema must define an index on ownerId');
+    assert.deepEqual(
+      platformNormalizedIndexes,
+      gatewayNormalizedIndexes,
+      'Platform API and Gateway Project schemas must define equivalent normalized ownerId index specifications'
+    );
+
+    // 3. Document validation without ownerId must fail on both models
+    const invalidPlatformDoc = new mongoose.Document(
+      { name: 'Invalid Platform Proj', upstream: 'http://localhost:8080' },
+      platformProjectSchema
+    );
+    const platformValErr = invalidPlatformDoc.validateSync();
+    assert.ok(platformValErr?.errors?.ownerId, 'Platform API document without ownerId must fail validation');
+
+    const invalidGatewayDoc = new mongoose.Document(
+      { name: 'Invalid Gateway Proj', upstream: 'http://localhost:8080' },
+      gatewayProjectSchema
+    );
+    const gatewayValErr = invalidGatewayDoc.validateSync();
+    assert.ok(gatewayValErr?.errors?.ownerId, 'Gateway document without ownerId must fail validation');
+
+    // 4. Document validation with ownerId must pass on both models
+    const validOwnerId = new mongoose.Types.ObjectId();
+    const validPlatformDoc = new mongoose.Document(
+      { name: 'Valid Platform Proj', upstream: 'http://localhost:8080', ownerId: validOwnerId },
+      platformProjectSchema
+    );
+    assert.equal(validPlatformDoc.validateSync(), undefined, 'Platform API document with ownerId must pass');
+
+    const validGatewayDoc = new mongoose.Document(
+      { name: 'Valid Gateway Proj', upstream: 'http://localhost:8080', ownerId: validOwnerId },
+      gatewayProjectSchema
+    );
+    assert.equal(validGatewayDoc.validateSync(), undefined, 'Gateway document with ownerId must pass');
+    console.log('  ✓ Project schema parity verified: ownerId required and normalized indexes match across both models\n');
+
+    // TEST 21: Nonexistent project -> 404
+    console.log('[TEST 21/27] [Validation] Nonexistent project -> 404');
     const nonExistentId = new mongoose.Types.ObjectId().toString();
     const nonExistentProjRes = await apiRequest(`/api/projects/${nonExistentId}`, {
       method: 'GET',
@@ -494,8 +718,8 @@ async function runControlPlaneVerification() {
     assert.equal(nonExistentProjRes.body.error.code, 'PROJECT_NOT_FOUND', 'Error code must be PROJECT_NOT_FOUND');
     console.log('  ✓ Nonexistent project returned 404 Not Found\n');
 
-    // TEST 19: Invalid request payload -> 400
-    console.log('[TEST 19/24] [Validation] Invalid request payload -> 400');
+    // TEST 22: Invalid request payload -> 400
+    console.log('[TEST 22/27] [Validation] Invalid request payload -> 400');
     // Invalid ObjectId format
     const invalidIdRes = await apiRequest('/api/projects/not-a-valid-object-id', {
       method: 'GET',
@@ -534,8 +758,8 @@ async function runControlPlaneVerification() {
     // SECTION 5: INTEGRATION & GATEWAY COMPATIBILITY
     // ===========================================================
 
-    // TEST 20: Create an active project via Control Plane API
-    console.log('[TEST 20/24] [Integration] Creating active project via Control Plane API...');
+    // TEST 23: Create an active project via Control Plane API
+    console.log('[TEST 23/27] [Integration] Creating active project via Control Plane API...');
     const gatewayProjRes = await apiRequest('/api/projects', {
       method: 'POST',
       token: tokenA,
@@ -551,8 +775,8 @@ async function runControlPlaneVerification() {
     createdProjectIds.push(gatewayProjectId);
     console.log(`  ✓ Active project created: ${gatewayProjectId}\n`);
 
-    // TEST 21: Create an active API key for it via Control Plane API
-    console.log('[TEST 21/24] [Integration] Creating active API key via Control Plane API...');
+    // TEST 24: Create an active API key for it via Control Plane API
+    console.log('[TEST 24/27] [Integration] Creating active API key via Control Plane API...');
     const gatewayKeyRes = await apiRequest(`/api/projects/${gatewayProjectId}/api-keys`, {
       method: 'POST',
       token: tokenA,
@@ -565,8 +789,8 @@ async function runControlPlaneVerification() {
     assert.ok(gatewayKeyHeader, 'apiKeyHeader must be returned');
     console.log(`  ✓ API key issued: keyId=${gatewayKeyId}, header=${gatewayKeyHeader}\n`);
 
-    // TEST 22: Create GET /users/123 route via Control Plane API
-    console.log('[TEST 22/24] [Integration] Creating GET /users/123 route via Control Plane API...');
+    // TEST 25: Create GET /users/123 route via Control Plane API
+    console.log('[TEST 25/27] [Integration] Creating GET /users/123 route via Control Plane API...');
     const gatewayRouteRes = await apiRequest(`/api/projects/${gatewayProjectId}/routes`, {
       method: 'POST',
       token: tokenA,
@@ -581,8 +805,8 @@ async function runControlPlaneVerification() {
     createdRouteIds.push(gatewayRouteId);
     console.log(`  ✓ Route created: GET /users/123 (id=${gatewayRouteId})\n`);
 
-    // TEST 23: Confirm the resulting documents are compatible with the existing Gateway
-    console.log('[TEST 23/24] [Integration] Confirming Gateway compatibility with apiKeyAuth and routeMatcher...');
+    // TEST 26: Confirm the resulting documents are compatible with the existing Gateway
+    console.log('[TEST 26/27] [Integration] Confirming Gateway compatibility with apiKeyAuth and routeMatcher...');
 
     // Helper to simulate Express req/res
     function mockGatewayReq({ header, method = 'GET', path = '/users/123' }) {
@@ -646,15 +870,15 @@ async function runControlPlaneVerification() {
 
     console.log('  ✓ Gateway authentication and dynamic route matching verified successfully\n');
 
-    // TEST 24: Confirm no manual MongoDB document insertions were required
-    console.log('[TEST 24/24] [Integration] Verifying zero manual MongoDB document insertions required...');
-    assert.ok(createdProjectIds.length >= 2, 'Projects created exclusively via REST API');
-    assert.ok(createdApiKeyIds.length >= 2, 'API keys created exclusively via REST API');
-    assert.ok(createdRouteIds.length >= 2, 'Routes created exclusively via REST API');
-    console.log('  ✓ All documents created, updated, and validated exclusively via Control Plane APIs\n');
+    // TEST 27: Confirm standard integration workflows require zero manual MongoDB insertions (distinguished from legacy security fixture)
+    console.log('[TEST 27/27] [Integration] Verifying API-driven integration workflows require zero manual MongoDB insertions...');
+    assert.ok(createdProjectIds.length >= 2, 'Integration projects created exclusively via REST API');
+    assert.ok(createdApiKeyIds.length >= 2, 'Integration API keys created exclusively via REST API');
+    assert.ok(createdRouteIds.length >= 2, 'Integration routes created exclusively via REST API');
+    console.log('  ✓ Operational integration documents created, updated, and validated exclusively via Control Plane APIs (distinguished from direct legacy security fixture)\n');
 
     console.log('====================================================');
-    console.log('  ALL 24 CONTROL PLANE VERIFICATIONS PASSED!       ');
+    console.log('  ALL 27 CONTROL PLANE VERIFICATIONS PASSED!       ');
     console.log('====================================================\n');
   } finally {
     // Cleanup test artifacts

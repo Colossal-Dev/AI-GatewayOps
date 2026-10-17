@@ -4,6 +4,7 @@ import bcrypt from 'bcrypt';
 import APIKey from '../apps/gateway/src/models/api-key.model.js';
 import Project from '../apps/gateway/src/models/project.model.js';
 import Route from '../apps/gateway/src/models/route.model.js';
+import mongoose from 'mongoose';
 import { connectDB, disconnectDB } from '../apps/gateway/src/config/database.js';
 import { startMockUpstream } from './mock-upstream.js';
 
@@ -49,6 +50,7 @@ async function runGatewayE2EVerification() {
     const testId = Date.now();
     const testSecret = `sec_e2e_${testId}_${Math.random().toString(36).substring(2, 10)}`;
     const hashedSecret = await bcrypt.hash(testSecret, 10);
+    const testOwnerId = new mongoose.Types.ObjectId();
 
     // Active Project
     const activeProject = await Project.create({
@@ -56,6 +58,7 @@ async function runGatewayE2EVerification() {
       description: 'Temporary test project for Gateway E2E verification',
       status: 'active',
       upstream: upstreamUrl,
+      ownerId: testOwnerId,
     });
     createdProjectIds.push(activeProject._id);
 
@@ -65,6 +68,7 @@ async function runGatewayE2EVerification() {
       description: 'Temporary inactive test project',
       status: 'disabled',
       upstream: upstreamUrl,
+      ownerId: testOwnerId,
     });
     createdProjectIds.push(inactiveProject._id);
 

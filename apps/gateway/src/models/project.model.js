@@ -25,6 +25,8 @@ const projectSchema = new mongoose.Schema(
     ownerId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'User',
+      required: [true, 'Owner ID is required'],
+      index: true,
     },
   },
   {
@@ -34,4 +36,5 @@ const projectSchema = new mongoose.Schema(
 
 const Project = mongoose.models.Project || mongoose.model('Project', projectSchema);
 
+export { projectSchema };
 export default Project;

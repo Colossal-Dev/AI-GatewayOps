@@ -25,9 +25,10 @@ async function validateProjectAccess(req, res, next) {
       return next(new ApiError(404, 'PROJECT_NOT_FOUND', 'Project not found'));
     }
 
-    // Authorization check: developer role can only access projects they own
-    if (req.user && req.user.role !== 'admin') {
-      if (project.ownerId && project.ownerId.toString() !== req.user.id.toString()) {
+    // Authorization check: non-admin roles can only access projects they own.
+    // Unowned/legacy projects (missing or null ownerId) must be denied for ordinary callers.
+    if (!req.user || req.user.role !== 'admin') {
+      if (!req.user || !project.ownerId || project.ownerId.toString() !== req.user.id?.toString()) {
         return next(
           new ApiError(403, 'FORBIDDEN', 'Access denied: you do not have permission to access this project')
         );
