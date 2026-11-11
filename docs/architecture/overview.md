@@ -102,6 +102,17 @@ flowchart TB
   - Policy enforcement: In-memory rate limiting per IP/API Key, CORS headers, client API Key validation (`x-api-key`).
   - Streaming reverse proxy: Transparently forwards method, headers, query params, and body using `http-proxy-middleware` (or native streaming HTTP proxy).
   - Telemetry capture: Computes round-trip latency (`process.hrtime`), status code, and writes sanitized telemetry records to MongoDB.
+* **Configuration Cache & Stampede Protection (`apps/gateway/src/utils/cache.js`)**:
+  - Cache-aside layer reading Redis before MongoDB.
+  - Per-key distributed locks (`SET NX PX` with Lua token matching) prevent cache stampedes under concurrent loads.
+  - Graceful degradation: Redis failures or unavailability automatically fall back to MongoDB without failing requests.
+  - **Environment Variables & Defaults**:
+    | Variable | Default | Description |
+    | :--- | :--- | :--- |
+    | `GATEWAY_CACHE_TTL_SECONDS` | `300` (5m) | Time-to-live for cached project and route configuration |
+    | `GATEWAY_CACHE_LOCK_TTL_MS` | `3000` (3s) | Maximum distributed lock hold duration before auto-release |
+    | `GATEWAY_CACHE_LOCK_MAX_WAIT_MS` | `300` (300ms) | Maximum duration a concurrent request waits for a lock before falling back to MongoDB |
+    | `GATEWAY_CACHE_LOCK_WAIT_INTERVAL_MS` | `50` (50ms) | Polling interval between lock re-checks |
 
 ### B. Control Plane: `apps/platform-api` (Port 5000)
 * **Purpose**: Multi-tenant management API for developers.
