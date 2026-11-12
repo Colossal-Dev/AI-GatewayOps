@@ -1,148 +1,298 @@
-/**
- * List of hop-by-hop headers that should not be forwarded between client and upstream.
- */
+import { createHash } from "node:crypto";
+import {
+  getCache,
+  setCache,
+  invalidateProjectResponseCache,
+} from "../utils/cache.js";
+
 const HOP_BY_HOP_HEADERS = new Set([
-  'x-api-key',
-  'host',
-  'connection',
-  'keep-alive',
-  'transfer-encoding',
-  'te',
-  'upgrade',
-  'proxy-authorization',
-  'proxy-authenticate',
+  "connection",
+  "keep-alive",
+  "proxy-authenticate",
+  "proxy-authorization",
+  "te",
+  "trailer",
+  "transfer-encoding",
+  "upgrade",
+  "host",
+  "content-length",
+  "x-api-key",
 ]);
 
+const CACHE_VARY_HEADERS = [
+  "authorization",
+  "cookie",
+  "accept",
+  "accept-language",
+];
+
+const MUTATION_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+const CACHEABLE_STATUS_CODES = new Set([200, 203, 204, 206]);
+
 /**
- * Builds the complete upstream target URL without malformed double slashes,
- * preserving dynamic path parameters and query strings.
- *
- * @param {string} upstreamBase - Upstream base URL configured on Project (e.g., 'http://localhost:3000' or 'https://api.service.internal/v1')
- * @param {string} pathname - Request pathname (e.g., '/users/123')
- * @param {string} [urlWithQuery] - Raw request URL containing query parameters if any (e.g., '/users/123?page=1')
- * @returns {string}
+ * Generate a project-specific response cache key.
  */
-export function buildUpstreamUrl(upstreamBase, pathname, urlWithQuery = '') {
-  const cleanBase = upstreamBase.trim().replace(/\/+$/, '');
-  const cleanPath = (pathname || '/').replace(/^\/+/, '');
+function createCacheKey(req, targetUrl) {
+  const identity = {};
 
-  let targetUrl = cleanPath ? `${cleanBase}/${cleanPath}` : cleanBase;
-
-  // Preserve query string from request if present
-  if (urlWithQuery && urlWithQuery.includes('?')) {
-    const queryString = urlWithQuery.substring(urlWithQuery.indexOf('?'));
-    targetUrl += queryString;
+  for (const header of CACHE_VARY_HEADERS) {
+    identity[header] = req.headers[header] || "";
   }
 
-  return targetUrl;
+  const identityHash = createHash("sha256")
+    .update(JSON.stringify(identity))
+    .digest("hex");
+
+  const projectId = req.project._id.toString();
+  const routeId = req.routeConfig._id.toString();
+
+  const rawKey = [routeId, targetUrl, identityHash].join(":");
+
+  const keyHash = createHash("sha256").update(rawKey).digest("hex");
+
+  return `gateway:response:${projectId}:${keyHash}`;
 }
 
 /**
- * Middleware for forwarding authenticated and matched requests to the project's upstream service.
+ * Construct the upstream URL.
  *
- * Architecture:
- *   apiKeyAuth -> routeMatcher -> upstreamProxy
- *
- * Responsibilities:
- * 1. Uses req.project.upstream as the target base URL.
- * 2. Uses req.method for the HTTP request method.
- * 3. Preserves the request body for POST, PUT, PATCH, etc.
- * 4. Filters out sensitive and hop-by-hop headers (strips X-API-Key and secret).
- * 5. Preserves query string and dynamic route path.
- * 6. Forwards upstream response status, headers, and body back to the client.
- * 7. Forwards connection failures to next(error) for standard Express handling.
- *
- * @param {import('express').Request} req
- * @param {import('express').Response} res
- * @param {import('express').NextFunction} next
+ * routeConfig.upstreamUrl should contain the upstream base URL.
+ * Example: https://jsonplaceholder.typicode.com
  */
-async function upstreamProxy(req, res, next) {
-  let targetUrl = '';
+function buildUpstreamUrl(req) {
+  const upstreamBase = req.routeConfig.upstreamUrl;
 
+  if (!upstreamBase) {
+    throw new Error("Upstream URL is not configured for this route");
+  }
+
+  const baseUrl = new URL(upstreamBase);
+
+  if (!["http:", "https:"].includes(baseUrl.protocol)) {
+    throw new Error("Only HTTP and HTTPS upstream URLs are supported");
+  }
+
+  const incomingPath = req.originalUrl.split("?")[0];
+
+  const upstreamPath = incomingPath.replace(/^\/proxy/, "");
+
+  const normalizedBasePath = baseUrl.pathname.replace(/\/+$/, "");
+  const normalizedIncomingPath = upstreamPath.startsWith("/")
+    ? upstreamPath
+    : `/${upstreamPath}`;
+
+  baseUrl.pathname = `${normalizedBasePath}${normalizedIncomingPath}`;
+
+  // Preserve the original query string.
+  baseUrl.search = req.originalUrl.includes("?")
+    ? req.originalUrl.substring(req.originalUrl.indexOf("?"))
+    : "";
+
+  return baseUrl.toString();
+}
+
+/**
+ * Filter headers that must not be forwarded.
+ */
+function filterHeaders(headers, additionalExcluded = []) {
+  const excluded = new Set([...HOP_BY_HOP_HEADERS, ...additionalExcluded]);
+
+  const result = {};
+
+  for (const [name, value] of Object.entries(headers)) {
+    if (!excluded.has(name.toLowerCase())) {
+      result[name] = value;
+    }
+  }
+
+  return result;
+}
+
+/**
+ * Prepare headers to forward to the upstream service.
+ */
+function buildUpstreamHeaders(req) {
+  return filterHeaders(req.headers, ["x-api-key", "x-request-id"]);
+}
+
+/**
+ * Prepare upstream response headers for the client.
+ */
+function buildClientHeaders(upstreamHeaders) {
+  const headers = {};
+
+  upstreamHeaders.forEach((value, name) => {
+    if (!HOP_BY_HOP_HEADERS.has(name.toLowerCase())) {
+      headers[name] = value;
+    }
+  });
+
+  return headers;
+}
+
+/**
+ * Determine whether the response can be cached.
+ */
+function isCacheableResponse(response, req) {
+  if (req.method !== "GET") {
+    return false;
+  }
+
+  if (!req.routeConfig.cache?.enabled) {
+    return false;
+  }
+
+  if (!CACHEABLE_STATUS_CODES.has(response.status)) {
+    return false;
+  }
+
+  // Never cache responses containing Set-Cookie.
+  if (response.headers.has("set-cookie")) {
+    return false;
+  }
+
+  // Avoid caching explicitly private/no-store responses.
+  const cacheControl = response.headers.get("cache-control") || "";
+
+  if (/private|no-store/i.test(cacheControl)) {
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * Send a cached response.
+ */
+function sendCachedResponse(res, cached) {
+  res.set("X-Gateway-Cache", "HIT");
+
+  if (cached.headers && typeof cached.headers === "object") {
+    res.set(cached.headers);
+  }
+
+  res.status(cached.status);
+
+  if (cached.body === "") {
+    return res.end();
+  }
+
+  return res.send(Buffer.from(cached.body, "base64"));
+}
+
+/**
+ * Gateway upstream proxy middleware.
+ */
+export async function upstreamProxy(req, res, next) {
   try {
-    const upstreamBase = req.project?.upstream;
+    const method = req.method.toUpperCase();
+    const targetUrl = buildUpstreamUrl(req);
 
-    // Protection against missing or invalid upstream configuration
-    if (!upstreamBase || typeof upstreamBase !== 'string' || !upstreamBase.trim()) {
-      return res.status(502).json({
-        success: false,
-        error: {
-          code: 'BAD_GATEWAY',
-          message: 'Invalid or missing upstream configuration',
-        },
-      });
-    }
+    const cacheEnabled =
+      method === "GET" && req.routeConfig.cache?.enabled === true;
 
-    // Validate upstream URL format
-    try {
-      new URL(upstreamBase.trim());
-    } catch {
-      return res.status(502).json({
-        success: false,
-        error: {
-          code: 'BAD_GATEWAY',
-          message: 'Invalid upstream URL configuration',
-        },
-      });
-    }
+    let cacheKey = null;
 
-    const pathname = req.path || '/';
-    const rawUrl = req.originalUrl || req.url || '';
-    targetUrl = buildUpstreamUrl(upstreamBase, pathname, rawUrl);
+    // ---------------------------------------------
+    // 1. RESPONSE CACHE LOOKUP
+    // ---------------------------------------------
+    if (cacheEnabled) {
+      cacheKey = createCacheKey(req, targetUrl);
 
-    // Build forwarded headers (exclude X-API-Key and hop-by-hop headers)
-    const forwardedHeaders = {};
-    if (req.headers) {
-      for (const [key, value] of Object.entries(req.headers)) {
-        const lowerKey = key.toLowerCase();
-        if (!HOP_BY_HOP_HEADERS.has(lowerKey) && value !== undefined) {
-          forwardedHeaders[lowerKey] = value;
-        }
+      const cached = await getCache(cacheKey);
+
+      if (
+        cached &&
+        typeof cached === "object" &&
+        typeof cached.body === "string" &&
+        Number.isInteger(cached.status)
+      ) {
+        return sendCachedResponse(res, cached);
       }
+
+      res.set("X-Gateway-Cache", "MISS");
+    } else {
+      res.set("X-Gateway-Cache", "BYPASS");
     }
 
-    const method = (req.method || 'GET').toUpperCase();
+    // ---------------------------------------------
+    // 2. PREPARE UPSTREAM REQUEST
+    // ---------------------------------------------
+    const headers = buildUpstreamHeaders(req);
+
     const fetchOptions = {
       method,
-      headers: forwardedHeaders,
+      headers,
+      redirect: "manual",
     };
 
-    // Forward request body for mutation methods (POST, PUT, PATCH, DELETE)
-    if (method !== 'GET' && method !== 'HEAD' && req.body !== undefined && req.body !== null) {
-      if (Buffer.isBuffer(req.body) || typeof req.body === 'string') {
-        fetchOptions.body = req.body;
-      } else if (typeof req.body === 'object') {
+    // GET and HEAD should not contain a request body.
+    if (!["GET", "HEAD"].includes(method) && req.body !== undefined) {
+      const contentType = req.headers["content-type"] || "";
+
+      if (
+        contentType.includes("application/json") &&
+        typeof req.body === "object"
+      ) {
         fetchOptions.body = JSON.stringify(req.body);
-        if (!forwardedHeaders['content-type']) {
-          forwardedHeaders['content-type'] = 'application/json';
-        }
+      } else if (Buffer.isBuffer(req.body)) {
+        fetchOptions.body = req.body;
+      } else if (typeof req.body === "string") {
+        fetchOptions.body = req.body;
       }
     }
 
-    // Execute upstream fetch
+    // ---------------------------------------------
+    // 3. CALL UPSTREAM
+    // ---------------------------------------------
     const upstreamResponse = await fetch(targetUrl, fetchOptions);
 
-    // Forward response status
-    res.status(upstreamResponse.status);
+    const responseHeaders = buildClientHeaders(upstreamResponse.headers);
 
-    // Forward response headers safely (excluding hop-by-hop headers)
-    upstreamResponse.headers.forEach((value, name) => {
-      const lowerName = name.toLowerCase();
-      if (lowerName !== 'transfer-encoding' && lowerName !== 'connection' && lowerName !== 'keep-alive') {
-        res.setHeader(name, value);
-      }
-    });
+    const responseBody = Buffer.from(await upstreamResponse.arrayBuffer());
 
-    // Forward upstream response body as buffer to support JSON, text, or binary
-    const responseArrayBuffer = await upstreamResponse.arrayBuffer();
-    const responseBuffer = Buffer.from(responseArrayBuffer);
+    const statusCode = upstreamResponse.status;
 
-    return res.send(responseBuffer);
-  } catch (error) {
-    console.error(`[upstreamProxy] Upstream forwarding failure to ${targetUrl || 'upstream'}: ${error.message}`);
-    return next(error);
+    // ---------------------------------------------
+    // 4. INVALIDATE PROJECT CACHE AFTER MUTATIONS
+    // ---------------------------------------------
+    const isMutation = MUTATION_METHODS.has(method);
+
+    const mutationSucceeded = statusCode >= 200 && statusCode < 300;
+
+    if (isMutation && mutationSucceeded) {
+      const projectId = req.project._id.toString();
+
+      await invalidateProjectResponseCache(projectId);
+    }
+
+    // ---------------------------------------------
+    // 5. STORE CACHEABLE RESPONSE
+    // ---------------------------------------------
+    if (cacheEnabled && isCacheableResponse(upstreamResponse, req)) {
+      const ttlSeconds = req.routeConfig.cache.ttlSeconds ?? 300;
+
+      const cachePayload = {
+        status: statusCode,
+        headers: responseHeaders,
+        body: responseBody.toString("base64"),
+      };
+
+      await setCache(cacheKey, cachePayload, ttlSeconds);
+    }
+
+    // ---------------------------------------------
+    // 6. RETURN UPSTREAM RESPONSE
+    // ---------------------------------------------
+    res.status(statusCode);
+
+    res.set(responseHeaders);
+
+    return res.send(responseBody);
+  } catch (err) {
+    return next(err);
   }
 }
 
-export { upstreamProxy };
 export default upstreamProxy;
